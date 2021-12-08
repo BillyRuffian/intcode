@@ -3,6 +3,7 @@ class ProgramCounter
 
   def inc(amount = 1)= @counter += amount
   def dec(amount = 1)= @counter -= amount
+  def set(value)= @counter = value
   def to_i()= @counter
   def to_s()= @counter.to_s
   def to_int()= @counter
@@ -10,46 +11,157 @@ class ProgramCounter
 end
 
 class Operation
-  attr_reader :memory
+  attr_reader :modes, :memory
+
+  MODE = {
+    position: 0,
+    immediate: 1
+  }
   
-  def initialize(memory)
-    @memory = memory
+  def initialize(opcode)
+    @modes = (opcode / 100).to_s.rjust(arity, '0').chars.reverse.map(&:to_i)
   end
   
   def arity()= 0
   def inspect()= self.class.name
+  def writes?()= true
   def perform(*args)
-    puts "Perform #{self} with #{args.join(',')}"
+    puts "Perform #{self} with #{args[1..-1].join(',')}"
+  end
+
+  def with_memory(memory)
+    @memory = memory
+    self
+  end
+
+  def attribute_values(attrs)
+    attributes = attrs.clone
+    write_location = attributes.pop if writes?
+
+    values = attributes.zip(modes).map { |(value, mode)| read(value, mode) }
+    values << write_location if writes?
+    values
+  end
+
+  def read(value, mode)
+    case mode
+    when MODE[:position]
+      memory[value]
+    when MODE[:immediate]
+      value
+    end
   end
   
   def self.fetch(opcode)
-    case opcode
-    when 1 then Add
-    when 2 then Multiply
-    when 99 then Halt
+    case opcode % 100
+    when 1 then Add.new(opcode)
+    when 2 then Multiply.new(opcode)
+    when 3 then Input.new(opcode)
+    when 4 then Output.new(opcode)
+    when 5 then JumpIfTrue.new(opcode)
+    when 6 then JumpIfFalse.new(opcode)
+    when 7 then LessThan.new(opcode)
+    when 8 then Equals.new(opcode)
+    when 99 then Halt.new(opcode)
     end
   end
 end
 
+class ReadOnlyOperation < Operation
+  def writes?()= false
+end
 
+class JumpOperation < ReadOnlyOperation
+  attr_reader :pc 
 
-class Halt < Operation; end
+  def with_program_counter(pc)
+    @pc = pc 
+    self
+  end
+end
+
+class Halt < ReadOnlyOperation; end
 
 class Add < Operation
   def arity()= 3
   
-  def perform(a, b, result_location)
-    memory.write(result_location, memory[a] + memory[b])
+  def perform(*args)
+    values = attribute_values(args)
+    memory.write(values[-1], values[0..-2].inject(:+))
   end
 end
 
 class Multiply < Operation
   def arity()= 3
   
-  def perform(a, b, result_location)
-    memory.write(result_location, memory[a] * memory[b])
+  def perform(*args)
+    values = attribute_values(args)
+    memory.write(values[-1], values[0..-2].inject(:*))
   end
 end
+
+class Input < Operation
+  def arity()= 1
+
+  def perform(result_location)
+    puts 'Input:'
+    memory.write(result_location, gets.chomp.to_i)
+  end
+end
+
+class Output < ReadOnlyOperation
+  def arity()= 1
+
+  def perform(*args)
+    values = attribute_values(args)
+    puts "> #{values.first}"
+  end
+end
+
+class JumpIfTrue < JumpOperation
+  def arity()= 2
+
+  def perform(*args)
+    values = attribute_values(args)
+    if !values.first.zero?
+      pc.set(values.last)
+    else
+      pc.inc(arity + 1)
+    end
+  end
+end
+
+class JumpIfFalse < JumpOperation
+  def arity()= 2
+
+  def perform(*args)
+    values = attribute_values(args)
+    if values.first.zero?
+      pc.set(values.last) 
+    else
+      pc.inc(arity + 1)
+    end
+  end
+end
+
+class LessThan < Operation 
+  def arity()= 3
+
+  def perform(*args)
+    values = attribute_values(args)
+    values[0] < values[1] ? memory.write(values[-1], 1) : memory.write(values[-1], 0)
+  end
+end
+
+class Equals < Operation 
+  def arity()= 3
+
+  def perform(*args)
+    values = attribute_values(args)
+    values[0] == values[1] ? memory.write(values[-1], 1) : memory.write(values[-1], 0)
+  end
+end
+
 
 class Memory
   def initialize(program)
@@ -74,24 +186,28 @@ class Intputer
   end
  
   def execute
-    while (op_class = Operation.fetch(memory[pc])) != Halt
-    
-      pp memory
-      if op_class
-        op = op_class.new(memory)
-        op.perform(*memory[pc.to_i + 1, op.arity])
+    while !(op = Operation.fetch(memory[pc])).kind_of? Halt
+      # pp pc
+      # pp memory[pc]
+      if op && op.kind_of?(JumpOperation)
+        op.with_memory(memory).with_program_counter(pc).perform(*memory[pc.to_i + 1, op.arity])
+      elsif op
+        op.with_memory(memory).perform(*memory[pc.to_i + 1, op.arity])
         pc.inc(op.arity + 1)
       else
+        warn "unknown opcode #{memory[pc]}"
         pc.inc
       end
     end
-    pp memory
+
   end
  
 end
 
 program = File.read('input.txt').split(',').map(&:to_i)
  
-Intputer.new(program).execute
- 
+intputer = Intputer.new(program)
+intputer.execute
+
+ # pp intputer.memory
  

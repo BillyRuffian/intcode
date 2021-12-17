@@ -16,7 +16,7 @@ module InputSource
     end
 
     def deliver
-      sleep 0.07
+      # sleep 0.07
       @ball.first <=> @paddle.first
     end
   end

@@ -1,4 +1,3 @@
-require 'pry'
 
 class ProgramCounter  
   def initialize()= @counter = 0
@@ -128,8 +127,11 @@ class Input < Operation
     super
   
     values = attribute_values(args)
-    puts 'Input:'
-    memory.write(values.first, gets.chomp.to_i)
+    memory.write(values.first, @input.deliver)
+  end
+
+  def with_input(input)
+    @input = input
   end
 end
 
@@ -139,7 +141,11 @@ class Output < ReadOnlyOperation
   def perform(*args)
     super
     values = attribute_values(args)
-    puts "> #{values.first}"
+    @output.receive(values.first)
+  end
+
+  def with_output(output)
+    @output = output
   end
 end
 
@@ -217,11 +223,13 @@ class Memory
 end
 
 class Intputer
-  attr_reader :memory, :pc, :rb
+  attr_reader :memory, :pc, :rb, :input, :output
 
-  def initialize(program)
+  def initialize(program, input:, output:)
     @pc = ProgramCounter.new
     @rb = ProgramCounter.new
+    @input = input 
+    @output = output
     @memory = Memory.new(program)
   end
  
@@ -230,22 +238,52 @@ class Intputer
       if op && op.kind_of?(JumpOperation)
         op.with_memory(memory).with_program_counter(pc).with_relative_base(rb).perform(*memory[pc.to_i + 1, op.arity])
       elsif op
-        op.with_memory(memory).with_relative_base(rb).perform(*memory[pc.to_i + 1, op.arity])
+        op.with_memory(memory).with_relative_base(rb)
+        if op.is_a? Input
+          op.with_input(input)
+        elsif op.is_a? Output
+          op.with_output(output)
+        end
+        op.perform(*memory[pc.to_i + 1, op.arity])
         pc.inc(op.arity + 1)
       else
         warn "unknown opcode #{memory[pc]}"
         pc.inc
       end
     end
-
   end
- 
 end
 
-program = File.read('input.txt').split(',').map(&:to_i)
- 
-intputer = Intputer.new(program)
-intputer.execute
+module InputSource
+  class StdIn
+    def deliver
+      print '<< '
+      gets.chomp.to_i
+    end
+  end
+end
+
+module OutputSink
+  class StdOut
+    def receive(value)
+      puts ">> #{value}"
+    end
+  end
+
+  class BufferedOutput
+    attr_reader :values 
+    
+    def initialize
+      @values = []
+    end
+
+    def receive(value)
+      values << value
+    end
+  end
+end
+
+
 
  # pp intputer.memory
  
